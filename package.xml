@@ -1,0 +1,23 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>mr3_mini_driver</name>
+  <version>0.1.0</version>
+  <description>ROS 2 driver package for the MR-3 Mini palletizing robot</description>
+  <maintainer email="matheus.vlino@gmail.com">Matheus Lino</maintainer>
+  <license>BSD-3-Clause</license>
+
+  <buildtool_depend>ament_python</buildtool_depend>
+
+  <exec_depend>rclpy</exec_depend>
+  <exec_depend>sensor_msgs</exec_depend>
+  <exec_depend>modena_common</exec_depend>
+  <exec_depend>modena_interfaces</exec_depend>
+  <exec_depend>robot_state_publisher</exec_depend>
+  <exec_depend>rviz2</exec_depend>
+  <exec_depend>plotjuggler</exec_depend>
+
+  <export>
+    <build_type>ament_python</build_type>
+  </export>
+</package>
