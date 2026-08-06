@@ -5,19 +5,16 @@ from enum import IntEnum
 import time
 
 
-# UART packet headers
 HEADER_1 = 0xAA
 HEADER_2 = 0x55
 HEADERS = bytes([HEADER_1, HEADER_2])
 
 
-# Communication state with the robot controller
 class CommState(IntEnum):
     COMM_ESTABLISHED = 0x00
     COMM_DISCONNECTED = 0x01
 
 
-# Message codes
 class Message(IntEnum):
     # Communication
     MSG_ESTABLISH_COMM = 0x00
@@ -34,18 +31,34 @@ class Message(IntEnum):
     # Jog
     MSG_JOG_START = 0x28
     MSG_JOG_STOP = 0x29   
+    
+    # Unknown code
+    MSG_UNKNOWN = 0xFF
 
 
 class MoveResult(IntEnum):
     # General results
-    MOVE_FINISHED = 0x00             # trajectory task finished motion    
-    MOVE_FEASIBLE = 0x01             # move is feasible
+    MOVE_FINISHED = 0x00
+    MOVE_FEASIBLE = 0x01
     MOVE_INFEASIBLE = 0x02           # move is infeasible: reduce speed or increase move distance    
-    MOVE_POSE_REACHABLE = 0x03       # target pose is inside the robot workspace and doesn't exceed joint limits
-    MOVE_OUTSIDE_OF_WORKSPACE = 0x04 # target pose is outside the robot workspace
+    MOVE_POSE_REACHABLE = 0x03
+    MOVE_OUTSIDE_OF_WORKSPACE = 0x04
+    MOVE_UNREACHABLE_INT_PT = 0x05   # an intermediate waypoint in a linear move is not reachable
+    MOVE_JOG_FINISHED = 0x06
     
-    # Speed/velocity limit violations
-    MOVE_SPEED_OUT_OF_RANGE = 0x64   # requested speed is outside the 1-100% range
+    # Move parameter limit violations
+    MOVE_SPEED_OUT_OF_RANGE = 0x64
+    MOVE_JOINT_VEL_LIMIT_EXCEEDED = 0x65
+    MOVE_LINEAR_VEL_LIMIT_EXCEEDED = 0x66
+    MOVE_JOINT_ACC_LIMIT_EXCEEDED = 0x67
+    MOVE_LINEAR_ACC_LIMIT_EXCEEDED = 0x68
+    
+    # Jog parameter limit violations
+    MOVE_JOG_SPEED_OUT_OF_RANGE = 0x69
+    MOVE_JOINT_JOG_VEL_LIMIT_EXCEEDED = 0x6A
+    MOVE_JOINT_JOG_ACC_LIMIT_EXCEEDED = 0x6B
+    MOVE_LINEAR_JOG_VEL_LIMIT_EXCEEDED = 0x6C
+    MOVE_LINEAR_JOG_ACC_LIMIT_EXCEEDED = 0x6D
 
     # Physical joint limit violations
     MOVE_J1_LIMIT_VIOLATION = 0x96
@@ -54,6 +67,15 @@ class MoveResult(IntEnum):
     MOVE_J4_LIMIT_VIOLATION = 0x99
     MOVE_MOTOR_3_LIMIT_VIOLATION = 0x9A
     MOVE_PASSIVE_JOINT_LIMIT_VIOLATION = 0x9B
+    
+    # Jogging cannot be started because a physical limit would be exceeded
+    MOVE_J1_JOG_LIMIT_PROXIMITY = 0x9C,
+    MOVE_J2_JOG_LIMIT_PROXIMITY = 0x9D,
+    MOVE_J3_JOG_LIMIT_PROXIMITY = 0x9E,
+    MOVE_J4_JOG_LIMIT_PROXIMITY = 0x9F,
+    MOVE_MOTOR_3_JOG_LIMIT_PROXIMITY = 0xA0,
+    MOVE_PASSIVE_JOINT_JOG_LIMIT_PROXIMITY = 0xA1
+    MOVE_WORKSPACE_JOG_LIMIT_PROXIMITY = 0xA2
 
 
 class MR3MiniComm:
@@ -61,7 +83,6 @@ class MR3MiniComm:
         self.uart = None
         self.comm_state = CommState.COMM_DISCONNECTED
 
-        # Buffer and index counting
         self.packet = bytearray(64)
         self.index = 0
     
@@ -78,7 +99,7 @@ class MR3MiniComm:
             
             # Try to establish communication
             for _ in range(retries):
-                self.init_comm() # sends connection request
+                self.init_comm()
                 start_time = time.time()
                 
                 while time.time() - start_time < timeout:
@@ -90,7 +111,6 @@ class MR3MiniComm:
                         
                         cmd = uart_msg[0]
                         
-                        # ACK received and connection successfully established
                         if cmd == Message.MSG_COMM_ESTABLISHED:
                             self.comm_state = CommState.COMM_ESTABLISHED
                             return
@@ -195,7 +215,7 @@ class MR3MiniComm:
             if self.index < 3:
                 return None
 
-            # Check headers. If it fails: shift left by 1 byte (resync)
+            # If headers check fails: shift left by 1 byte (resync)
             if self.packet[0] != HEADER_1 or self.packet[1] != HEADER_2:                
                 self.packet[: self.index - 1] = self.packet[1 : self.index]
                 self.index -= 1
@@ -207,7 +227,6 @@ class MR3MiniComm:
             if self.index < total_length:
                 return None  
 
-            # Compute checksum and keep only 8 lowest bits (1 byte)
             checksum = sum(self.packet[0 : total_length - 1]) & 0xFF
 
             # If checksum fails: remove invalid packet from the buffer
@@ -238,9 +257,10 @@ class MR3MiniComm:
 
             elif cmd == Message.MSG_DISCONNECTED:
                 result = (cmd, None)
-
+                
             else:
-                result = None
+                cmd == Message.MSG_UNKNOWN
+                result = (cmd, None)
 
             # Remove processed packet
             remaining = self.index - total_length
@@ -251,4 +271,4 @@ class MR3MiniComm:
             else:
                 self.index = 0
 
-            return result
+            return result   
