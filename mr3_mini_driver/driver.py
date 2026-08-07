@@ -4,7 +4,7 @@ from sensor_msgs.msg import JointState
 from modena_common.enums import JogType
 from modena_interfaces.msg import JogCmd
 from modena_interfaces.msg import RobotState
-from mr3_mini_driver.comm import MR3MiniComm, Message, MoveResult
+from mr3_mini_driver.comm import MR3MiniComm, Message, MoveResult, Fault, Warning
 import math
 
 
@@ -29,6 +29,7 @@ class MR3MiniDriver(Node):
         self.get_logger().info("Connection successfully established")
 
         self.uart_timer = self.create_timer(0.005, self.read_uart)        
+        self.heartbeat_timer = self.create_timer(0.100, self.pulse_beat, autostart=False)
 
     def jog_callback(self, msg):
         if msg.type != JogType.JOG_NONE:
@@ -40,6 +41,9 @@ class MR3MiniDriver(Node):
             if self.is_jogging:
                 self.is_jogging = False
                 self.comm.jog_stop()
+                
+    def pulse_beat(self):
+        self.comm.send_heartbeat()
 
     def read_uart(self):
         # Read and process all complete UART packets currently available
@@ -67,42 +71,93 @@ class MR3MiniDriver(Node):
                 msg.header.stamp = self.get_clock().now().to_msg()
 
                 self.joint_state_pub.publish(msg)
+                
+            elif cmd == Message.MSG_SYSTEM_INIT_OK:
+                self.get_logger().info("System initialized")
+                self.heartbeat_timer.reset()
             
             elif cmd == Message.MSG_MOVE_RESULT:
                 match data:             
                     # Jogging cannot be started because a physical limit would be exceeded
                     case MoveResult.MOVE_J1_JOG_LIMIT_PROXIMITY:
-                        self.get_logger().warning("Cannot start jogging: Joint 1 limit is too close")
+                        self.get_logger().warning("Cannot jog: J1 limit is too close")
                     case MoveResult.MOVE_J2_JOG_LIMIT_PROXIMITY:
-                        self.get_logger().warning("Cannot start jogging: Joint 2 limit is too close")
+                        self.get_logger().warning("Cannot jog: J2 limit is too close")
                     case MoveResult.MOVE_J3_JOG_LIMIT_PROXIMITY:
-                        self.get_logger().warning("Cannot start jogging: Joint 3 limit is too close")
+                        self.get_logger().warning("Cannot jog: J3 limit is too close")
                     case MoveResult.MOVE_J4_JOG_LIMIT_PROXIMITY:
-                        self.get_logger().warning("Cannot start jogging: Joint 4 limit is too close")
+                        self.get_logger().warning("Cannot jog: J4 limit is too close")
                     case MoveResult.MOVE_MOTOR_3_JOG_LIMIT_PROXIMITY:
-                        self.get_logger().warning("Cannot start jogging: Motor 3 joint limit is too close")
+                        self.get_logger().warning("Cannot jog: M3 joint limit is too close")
                     case MoveResult.MOVE_PASSIVE_JOINT_JOG_LIMIT_PROXIMITY:
-                        self.get_logger().warning("Cannot start jogging: Passive joint limit is too close")
+                        self.get_logger().warning("Cannot jog: Passive joint limit is too close")
                     case MoveResult.MOVE_WORKSPACE_JOG_LIMIT_PROXIMITY:
-                        self.get_logger().warning("Cannot start jogging: Workspace limit is too close")
+                        self.get_logger().warning("Cannot jog: Workspace limit is too close")
                     
                     # Requested jog speed, velocity, or acceleration exceeds the limit
                     case MoveResult.MOVE_JOG_SPEED_OUT_OF_RANGE:
-                        self.get_logger().warning("Cannot start jogging: requested jog speed is outside the valid range (1-100%)")
+                        self.get_logger().warning("Cannot jog: requested jog speed is outside the valid range (1-100%)")
                     case MoveResult.MOVE_JOINT_JOG_VEL_LIMIT_EXCEEDED:
-                        self.get_logger().warning("Cannot start jogging: requested joint jog velocity exceeds the limit")
+                        self.get_logger().warning("Cannot jog: requested joint jog velocity exceeds the limit")
                     case MoveResult.MOVE_JOINT_JOG_ACC_LIMIT_EXCEEDED:
-                        self.get_logger().warning("Cannot start jogging: requested joint jog acceleration exceeds the limit")
+                        self.get_logger().warning("Cannot jog: requested joint jog acceleration exceeds the limit")
                     case MoveResult.MOVE_LINEAR_JOG_VEL_LIMIT_EXCEEDED:
-                        self.get_logger().warning("Cannot start jogging: requested linear jog velocity exceeds the limit")
+                        self.get_logger().warning("Cannot jog: requested linear jog velocity exceeds the limit")
                     case MoveResult.MOVE_LINEAR_JOG_ACC_LIMIT_EXCEEDED:
-                        self.get_logger().warning("Cannot start jogging: requested linear jog acceleration exceeds the limit")  
+                        self.get_logger().warning("Cannot jog: requested linear jog acceleration exceeds the limit")
+                    
+                    case MoveResult.MOVE_HOMING_FINISHED:
+                        self.get_logger().info("Homing finished")
+                        
+            elif cmd == Message.MSG_FAULT_RAISE:                
+                match data:
+                    # Hardware timer
+                    case Fault.FAULT_HW_TIMER_INIT:
+                        self.get_logger().error("Timer initialization failed")
+                    case Fault.FAULT_HW_TIMER_COUNTER:
+                        self.get_logger().error("Failed to set timer counter value")
+                    case Fault.FAULT_HW_TIMER_ALARM:
+                        self.get_logger().error("Failed to set timer alarm value")
+                    case Fault.FAULT_HW_TIMER_ENABLE_INTR:
+                        self.get_logger().error("Failed to enable timer interrupt")
+                    case Fault.FAULT_HW_TIMER_ISR_ADD:
+                        self.get_logger().error("Failed to add timer ISR callback")
+                    case Fault.FAULT_HW_TIMER_START:
+                        self.get_logger().error("Failed to start timer")
+                    
+                    # Control loop
+                    case Fault.FAULT_CONTROL_LOOP_QUEUE_INIT:
+                        self.get_logger().error("Control queue initialization failed")
+                    case Fault.FAULT_CONTROL_LOOP_TASK_INIT:
+                        self.get_logger().error("Control task initialization failed")
+                    
+                    # Program executor
+                    case Fault.FAULT_PROG_EXEC_QUEUE_INIT:
+                        self.get_logger().error("Program queue initialization failed")
+                    case Fault.FAULT_PROG_EXEC_TASK_INIT:
+                        self.get_logger().error("Program task initialization failed")
+                        
+                    # Communication monitor
+                    case Fault.FAULT_COMM_MONITOR_TASK_INIT:
+                        self.get_logger().error("Communication monitor initialization failed")
+                    case Fault.FAULT_COMM_MONITOR_TIMEOUT:
+                        self.get_logger().error("Heartbeat timed out")
+                                    
+            elif cmd == Message.MSG_WARNING_RAISE:
+                match data:
+                    case Warning.WARNING_STATE_FEEDBACK_TASK_INIT:
+                        self.get_logger().warning("State feedback initialization failed")
+                    case Warning.WARNING_CONTROL_LOOP_QUEUE_FULL:
+                        self.get_logger().warning("Control queue is full: the last message has been discarded")
+                    case Warning.WARNING_PROG_EXEC_QUEUE_FULL:
+                        self.get_logger().warning("Program queue is full: the last instruction has been discarded")
             
             elif cmd == Message.MSG_UNKNOWN:
                 self.get_logger().warning(f"Unknown message code received: {cmd}")                  
                                                              
     def destroy_node(self):
         self.uart_timer.cancel()
+        self.heartbeat_timer.cancel()
         
         try:
             self.comm.end_uart()

@@ -21,6 +21,7 @@ class Message(IntEnum):
     MSG_COMM_ESTABLISHED = 0x01
     MSG_DISCONNECT = 0x02
     MSG_DISCONNECTED = 0x03
+    MSG_HEARTBEAT = 0x04
     
     # Data
     MSG_ROBOT_STATE = 0x0A
@@ -31,6 +32,11 @@ class Message(IntEnum):
     # Jog
     MSG_JOG_START = 0x28
     MSG_JOG_STOP = 0x29   
+    
+    # System information
+    MSG_SYSTEM_INIT_OK = 0x6E
+    MSG_FAULT_RAISE = 0x6F
+    MSG_WARNING_RAISE = 0x70
     
     # Unknown code
     MSG_UNKNOWN = 0xFF
@@ -45,6 +51,7 @@ class MoveResult(IntEnum):
     MOVE_OUTSIDE_OF_WORKSPACE = 0x04
     MOVE_UNREACHABLE_INT_PT = 0x05   # an intermediate waypoint in a linear move is not reachable
     MOVE_JOG_FINISHED = 0x06
+    MOVE_HOMING_FINISHED = 0x07
     
     # Move parameter limit violations
     MOVE_SPEED_OUT_OF_RANGE = 0x64
@@ -76,6 +83,33 @@ class MoveResult(IntEnum):
     MOVE_MOTOR_3_JOG_LIMIT_PROXIMITY = 0xA0,
     MOVE_PASSIVE_JOINT_JOG_LIMIT_PROXIMITY = 0xA1
     MOVE_WORKSPACE_JOG_LIMIT_PROXIMITY = 0xA2
+    
+
+class Fault(IntEnum):
+    # Control loop
+    FAULT_CONTROL_LOOP_QUEUE_INIT = 0x32
+    FAULT_CONTROL_LOOP_TASK_INIT = 0x33
+    
+    # Program executor
+    FAULT_PROG_EXEC_QUEUE_INIT = 0x3C
+    FAULT_PROG_EXEC_TASK_INIT = 0x3D
+    
+    # Hardware timer
+    FAULT_HW_TIMER_INIT = 0x46
+    FAULT_HW_TIMER_COUNTER = 0x47
+    FAULT_HW_TIMER_ALARM = 0x48
+    FAULT_HW_TIMER_ENABLE_INTR = 0x49
+    FAULT_HW_TIMER_ISR_ADD = 0x4A
+    FAULT_HW_TIMER_START = 0x4B
+    
+    # Communication monitor
+    FAULT_COMM_MONITOR_TASK_INIT = 0x73
+    FAULT_COMM_MONITOR_TIMEOUT = 0x74
+
+class Warning(IntEnum):
+    WARNING_STATE_FEEDBACK_TASK_INIT = 0x00
+    WARNING_CONTROL_LOOP_QUEUE_FULL = 0x01
+    WARNING_PROG_EXEC_QUEUE_FULL = 0x02
 
 
 class MR3MiniComm:
@@ -188,6 +222,14 @@ class MR3MiniComm:
         data = bytes([0])
         packet = self.build_packet(code, data)
         self.uart.write(packet)
+    
+    def send_heartbeat(self):
+        self.check_comm()
+        
+        code = Message.MSG_HEARTBEAT
+        data = bytes([0])
+        packet = self.build_packet(code, data)
+        self.uart.write(packet)
 
     def build_packet(self, code, data): # packet structure = [HEADER_1][HEADER_2][LENGTH][CODE][DATA][CHECKSUM]
         code = bytes([code])
@@ -257,6 +299,17 @@ class MR3MiniComm:
 
             elif cmd == Message.MSG_DISCONNECTED:
                 result = (cmd, None)
+            
+            elif cmd == Message.MSG_SYSTEM_INIT_OK:
+                result = (cmd, None)
+            
+            elif cmd == Message.MSG_FAULT_RAISE:
+                fault = Fault(self.packet[4])
+                result = (cmd, fault)
+                        
+            elif cmd == Message.MSG_WARNING_RAISE:
+                warning = Warning(self.packet[4])
+                result = (cmd, warning)
                 
             else:
                 cmd == Message.MSG_UNKNOWN
