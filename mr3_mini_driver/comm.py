@@ -283,37 +283,38 @@ class MR3MiniComm:
                 return None
 
             cmd = Message(self.packet[3])
-
-            if cmd == Message.MSG_ROBOT_STATE:
-                joint_pos = struct.unpack("<4f", self.packet[4:20])
-                pose = struct.unpack("<4f", self.packet[20:36])
-                state = (joint_pos, pose)
-                result = (cmd, state)
-
-            elif cmd == Message.MSG_MOVE_RESULT:
-                moveResult = MoveResult(self.packet[4])
-                result = (cmd, moveResult)
-
-            elif cmd == Message.MSG_COMM_ESTABLISHED:
-                result = (cmd, None)
-
-            elif cmd == Message.MSG_DISCONNECTED:
-                result = (cmd, None)
             
-            elif cmd == Message.MSG_SYSTEM_INIT_OK:
-                result = (cmd, None)
-            
-            elif cmd == Message.MSG_FAULT_RAISE:
-                fault = Fault(self.packet[4])
-                result = (cmd, fault)
-                        
-            elif cmd == Message.MSG_WARNING_RAISE:
-                warning = Warning(self.packet[4])
-                result = (cmd, warning)
+            match cmd:                
+                case Message.MSG_ROBOT_STATE:
+                    joint_pos = struct.unpack("<4f", self.packet[4:20])
+                    pose = struct.unpack("<4f", self.packet[20:36])
+                    state = (joint_pos, pose)
+                    result = (cmd, state)
+
+                case Message.MSG_MOVE_RESULT:
+                    moveResult = MoveResult(self.packet[4])
+                    result = (cmd, moveResult)
+
+                case Message.MSG_COMM_ESTABLISHED:
+                    result = (cmd, None)
+
+                case Message.MSG_DISCONNECTED:
+                    result = (cmd, None)
                 
-            else:
-                cmd == Message.MSG_UNKNOWN
-                result = (cmd, None)
+                case Message.MSG_SYSTEM_INIT_OK:
+                    result = (cmd, None)
+                
+                case Message.MSG_FAULT_RAISE:
+                    fault = Fault(self.packet[4])
+                    result = (cmd, fault)
+                            
+                case Message.MSG_WARNING_RAISE:
+                    warning = Warning(self.packet[4])
+                    result = (cmd, warning)
+                    
+                case _:
+                    cmd = Message.MSG_UNKNOWN
+                    result = (cmd, None)
 
             # Remove processed packet
             remaining = self.index - total_length
