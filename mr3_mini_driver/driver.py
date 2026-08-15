@@ -6,6 +6,13 @@ from modena_interfaces.msg import JogCmd
 from modena_interfaces.msg import RobotState
 from mr3_mini_driver.comm import MR3MiniComm, Message, MoveResult, Fault, Warning
 import math
+import threading
+import time
+
+
+UART_THREAD_PERIOD = 0.005
+HEARTBEAT_PERIOD = 0.1
+HEARTBEAT_PERIOD_TICKS = round(HEARTBEAT_PERIOD/UART_THREAD_PERIOD)
 
 
 class MR3MiniDriver(Node):
@@ -27,9 +34,15 @@ class MR3MiniDriver(Node):
         self.comm = MR3MiniComm()
         self.comm.init_uart()
         self.get_logger().info("Connection successfully established")
+        
+        self.heartbeat_enabled = False
+        self.heartbeat_tick_counter = 0    
 
-        self.uart_timer = self.create_timer(0.005, self.read_uart)        
-        self.heartbeat_timer = self.create_timer(0.100, self.pulse_beat, autostart=False)
+        self.uart_thread_running = threading.Event()
+        self.uart_thread_running.set()
+        
+        self.uart_thread = threading.Thread(target=self.uart_thread_loop, daemon=True)
+        self.uart_thread.start()
 
     def jog_callback(self, msg):
         if msg.type != JogType.JOG_NONE:
@@ -44,6 +57,19 @@ class MR3MiniDriver(Node):
                 
     def pulse_beat(self):
         self.comm.send_heartbeat()
+        
+    def uart_thread_loop(self):
+        while self.uart_thread_running.is_set():
+            self.read_uart()            
+            
+            if self.heartbeat_enabled:
+                self.heartbeat_tick_counter += 1
+                
+                if self.heartbeat_tick_counter >= HEARTBEAT_PERIOD_TICKS:
+                    self.pulse_beat()
+                    self.heartbeat_tick_counter = 0
+            
+            time.sleep(UART_THREAD_PERIOD)
 
     def read_uart(self):
         # Read and process all complete UART packets currently available
@@ -74,8 +100,9 @@ class MR3MiniDriver(Node):
                 
             elif cmd == Message.MSG_SYSTEM_INIT_OK:
                 self.get_logger().info("System initialized")
-                self.heartbeat_timer.reset()
-            
+                self.heartbeat_tick_counter = 0
+                self.heartbeat_enabled = True
+
             elif cmd == Message.MSG_MOVE_RESULT:
                 match data:             
                     # Jogging cannot be started because a physical limit would be exceeded
@@ -156,8 +183,9 @@ class MR3MiniDriver(Node):
                 self.get_logger().warning(f"Unknown message code received: {cmd}")                  
                                                              
     def destroy_node(self):
-        self.uart_timer.cancel()
-        self.heartbeat_timer.cancel()
+        self.heartbeat_enabled = False
+        self.uart_thread_running.clear()
+        self.uart_thread.join()
         
         try:
             self.comm.end_uart()
