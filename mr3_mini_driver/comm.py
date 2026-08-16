@@ -33,6 +33,10 @@ class Message(IntEnum):
     MSG_JOG_START = 0x28
     MSG_JOG_STOP = 0x29   
     
+    # Default positions
+    MSG_MOVE_HOME = 0x2D,
+    MSG_MOVE_REST = 0x2E,
+    
     # System information
     MSG_SYSTEM_INIT_OK = 0x6E
     MSG_FAULT_RAISE = 0x6F
@@ -229,6 +233,22 @@ class MR3MiniComm:
         code = Message.MSG_HEARTBEAT
         data = bytes([0])
         packet = self.build_packet(code, data)
+        self.uart.write(packet)
+    
+    def move_home(self, speed):
+        self.check_comm()
+        
+        code = Message.MSG_MOVE_HOME
+        data = bytes([speed])        
+        packet = self.build_packet(code, data)        
+        self.uart.write(packet)
+    
+    def move_rest(self):        
+        self.check_comm()
+        
+        code = Message.MSG_MOVE_REST
+        data = bytes([0])
+        packet = self.build_packet(code, data) 
         self.uart.write(packet)
 
     def build_packet(self, code, data): # packet structure = [HEADER_1][HEADER_2][LENGTH][CODE][DATA][CHECKSUM]

@@ -1,9 +1,10 @@
 import rclpy
 from rclpy.node import Node
+from rclpy.action import ActionServer
 from sensor_msgs.msg import JointState
 from modena_common.enums import JogType
-from modena_interfaces.msg import JogCmd
-from modena_interfaces.msg import RobotState
+from modena_interfaces.msg import JogCmd, RobotState
+from modena_interfaces.action import MoveHome, MoveRest
 from mr3_mini_driver.comm import MR3MiniComm, Message, MoveResult, Fault, Warning
 import math
 import threading
@@ -27,7 +28,10 @@ class MR3MiniDriver(Node):
 
         self.joint_state_pub = self.create_publisher(JointState, "joint_states", 10)        
         self.robot_state_pub = self.create_publisher(RobotState, "robot_state", 10)
-        self.jog_cmd_sub = self.create_subscription(JogCmd, "jog_cmd", self.jog_callback, 10)        
+        self.jog_cmd_sub = self.create_subscription(JogCmd, "jog_cmd", self.jog_callback, 10)
+        
+        self.move_home_srv = ActionServer(self, MoveHome, "move_home", self.move_home_callback)
+        self.move_rest_srv = ActionServer(self, MoveRest, "move_rest", self.move_rest_callback)
         
         self.get_logger().info("MR-3 Mini driver started")
 
@@ -37,6 +41,9 @@ class MR3MiniDriver(Node):
         
         self.heartbeat_enabled = False
         self.heartbeat_tick_counter = 0    
+        
+        self.move_finished = threading.Event()
+        self.move_result = None
 
         self.uart_thread_running = threading.Event()
         self.uart_thread_running.set()
@@ -54,6 +61,36 @@ class MR3MiniDriver(Node):
             if self.is_jogging:
                 self.is_jogging = False
                 self.comm.jog_stop()
+
+    def move_home_callback(self, goal_handle):
+        goal = goal_handle.request
+        
+        self.move_finished.clear()
+        self.move_result = None
+        
+        self.comm.move_home(goal.speed)       
+        self.move_finished.wait()        
+        goal_handle.succeed()
+        
+        result = MoveHome.Result()
+        result.move_result = self.move_result
+        
+        return result
+    
+    def move_rest_callback(self, goal_handle):
+        goal = goal_handle.request
+        
+        self.move_finished.clear()
+        self.move_result = None
+        
+        self.comm.move_rest()     
+        self.move_finished.wait()        
+        goal_handle.succeed()
+        
+        result = MoveRest.Result()
+        result.move_result = self.move_result
+        
+        return result
                 
     def pulse_beat(self):
         self.comm.send_heartbeat()
@@ -136,6 +173,12 @@ class MR3MiniDriver(Node):
                         
                         case MoveResult.MOVE_HOMING_FINISHED:
                             self.get_logger().info("Homing finished")
+                        case MoveResult.MOVE_FINISHED:
+                            self.move_result = data
+                            self.move_finished.set()
+                        case _:
+                            self.move_result = data
+                            self.move_finished.set()
                         
                 case Message.MSG_FAULT_RAISE:                
                     match data:

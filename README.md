@@ -3,7 +3,7 @@ ROS 2 driver for the MR-3 Mini palletizing robot.
 
 This package provides communication between ROS 2 and the MR-3 Mini robot controller.
 
-It publishes the robot state, receives jog commands, and includes a launch file for visualization and debugging.
+It publishes the robot state, receives jog commands, and provides action interfaces for executing robot motions.
 
 To jog the robot, start the `keyboard_teleop` node from the `modena_teleop` package after launching the driver.
 
@@ -14,6 +14,8 @@ To jog the robot, start the `keyboard_teleop` node from the `modena_teleop` pack
 - Joint state publishing
 - Robot state publishing
 - Receives jog commands from ROS 2 nodes
+- HOME and REST motion actions
+- Motion result reporting
 - RViz visualization
 - PlotJuggler integration
 
@@ -86,6 +88,12 @@ PlotJuggler will then open and start plotting joint positions from `RobotState` 
 | Topic | Message Type | Description |
 |--------|--------------|-------------|
 | `/jog_cmd` | `modena_interfaces/JogCmd` | Jog commands from teleoperation |
+
+## Action Servers
+| Action | Action Type | Description |
+|--------|--------------|-------------|
+| `/move_home` | `modena_interfaces/MoveHome` | Move the robot to the HOME position at the specified speed |
+| `/move_rest` | `modena_interfaces/MoveRest` | Move the robot to the REST position at the predefined speed |
 
 ## Dependencies
 This package depends on:
