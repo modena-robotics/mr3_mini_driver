@@ -4,7 +4,7 @@ from rclpy.action import ActionServer
 from sensor_msgs.msg import JointState
 from modena_common.enums import JogType
 from modena_interfaces.msg import JogCmd, RobotState
-from modena_interfaces.action import MoveHome, MoveRest
+from modena_interfaces.action import MoveHome, MoveRest, MoveAbsJ
 from mr3_mini_driver.comm import MR3MiniComm, Message, MoveResult, Fault, Warning
 import math
 import threading
@@ -32,6 +32,7 @@ class MR3MiniDriver(Node):
         
         self.move_home_srv = ActionServer(self, MoveHome, "move_home", self.move_home_callback)
         self.move_rest_srv = ActionServer(self, MoveRest, "move_rest", self.move_rest_callback)
+        self.move_abs_j_srv = ActionServer(self, MoveAbsJ, "move_abs_j", self.move_abs_j_callback)
         
         self.get_logger().info("MR-3 Mini driver started")
 
@@ -61,36 +62,34 @@ class MR3MiniDriver(Node):
             if self.is_jogging:
                 self.is_jogging = False
                 self.comm.jog_stop()
+                
+    def execute_motion(self, goal_handle, comm_fcn, result_type, use_goal=True):
+        goal = goal_handle.request
+        
+        self.move_finished.clear()
+        self.move_result = None
+        
+        if use_goal:
+            comm_fcn(goal)
+        else:
+            comm_fcn()
+        
+        self.move_finished.wait()        
+        goal_handle.succeed()
+        
+        result = result_type()
+        result.move_result = self.move_result
+        
+        return result
 
     def move_home_callback(self, goal_handle):
-        goal = goal_handle.request
-        
-        self.move_finished.clear()
-        self.move_result = None
-        
-        self.comm.move_home(goal.speed)       
-        self.move_finished.wait()        
-        goal_handle.succeed()
-        
-        result = MoveHome.Result()
-        result.move_result = self.move_result
-        
-        return result
+       return self.execute_motion(goal_handle, self.comm.move_home, MoveHome.Result)
     
     def move_rest_callback(self, goal_handle):
-        goal = goal_handle.request
-        
-        self.move_finished.clear()
-        self.move_result = None
-        
-        self.comm.move_rest()     
-        self.move_finished.wait()        
-        goal_handle.succeed()
-        
-        result = MoveRest.Result()
-        result.move_result = self.move_result
-        
-        return result
+        return self.execute_motion(goal_handle, self.comm.move_rest, MoveRest.Result, False)
+    
+    def move_abs_j_callback(self, goal_handle):
+        return self.execute_motion(goal_handle, self.comm.move_abs_j, MoveAbsJ.Result)
                 
     def pulse_beat(self):
         self.comm.send_heartbeat()

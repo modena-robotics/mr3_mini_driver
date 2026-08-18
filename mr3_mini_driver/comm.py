@@ -29,7 +29,7 @@ class Message(IntEnum):
     # Move result
     MSG_MOVE_RESULT = 0x1E
 
-    # Jog
+    # Jog instructions
     MSG_JOG_START = 0x28
     MSG_JOG_STOP = 0x29   
     
@@ -41,6 +41,9 @@ class Message(IntEnum):
     MSG_SYSTEM_INIT_OK = 0x6E
     MSG_FAULT_RAISE = 0x6F
     MSG_WARNING_RAISE = 0x70
+    
+    # Robot instructions
+    MSG_ABS_JOINT_MOVE = 0x96,
     
     # Unknown code
     MSG_UNKNOWN = 0xFF
@@ -235,11 +238,11 @@ class MR3MiniComm:
         packet = self.build_packet(code, data)
         self.uart.write(packet)
     
-    def move_home(self, speed):
+    def move_home(self, cmd):
         self.check_comm()
         
         code = Message.MSG_MOVE_HOME
-        data = bytes([speed])        
+        data = bytes([cmd.speed])        
         packet = self.build_packet(code, data)        
         self.uart.write(packet)
     
@@ -250,7 +253,18 @@ class MR3MiniComm:
         data = bytes([0])
         packet = self.build_packet(code, data) 
         self.uart.write(packet)
-
+        
+    def move_abs_j(self, cmd):
+        self.check_comm()
+        
+        pos = cmd.pos
+        speed = cmd.speed
+        
+        code = Message.MSG_ABS_JOINT_MOVE
+        data = struct.pack('<ffffB', pos[0], pos[1], pos[2], pos[3], speed)
+        packet = self.build_packet(code, data)
+        self.uart.write(packet)     
+        
     def build_packet(self, code, data): # packet structure = [HEADER_1][HEADER_2][LENGTH][CODE][DATA][CHECKSUM]
         code = bytes([code])
         length = bytes([len(code) + len(data)])
