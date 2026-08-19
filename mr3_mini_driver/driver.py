@@ -4,7 +4,7 @@ from rclpy.action import ActionServer
 from sensor_msgs.msg import JointState
 from modena_common.enums import JogType
 from modena_interfaces.msg import JogCmd, RobotState
-from modena_interfaces.action import MoveHome, MoveRest, MoveAbsJ
+from modena_interfaces.action import MoveHome, MoveRest, MoveAbsJ, MoveJ
 from mr3_mini_driver.comm import MR3MiniComm, Message, MoveResult, Fault, Warning
 import math
 import threading
@@ -33,6 +33,7 @@ class MR3MiniDriver(Node):
         self.move_home_srv = ActionServer(self, MoveHome, "move_home", self.move_home_callback)
         self.move_rest_srv = ActionServer(self, MoveRest, "move_rest", self.move_rest_callback)
         self.move_abs_j_srv = ActionServer(self, MoveAbsJ, "move_abs_j", self.move_abs_j_callback)
+        self.move_j_srv = ActionServer(self, MoveJ, "move_j", self.move_j_callback)
         
         self.get_logger().info("MR-3 Mini driver started")
 
@@ -90,6 +91,9 @@ class MR3MiniDriver(Node):
     
     def move_abs_j_callback(self, goal_handle):
         return self.execute_motion(goal_handle, self.comm.move_abs_j, MoveAbsJ.Result)
+    
+    def move_j_callback(self, goal_handle):
+        return self.execute_motion(goal_handle, self.comm.move_j, MoveJ.Result)
                 
     def pulse_beat(self):
         self.comm.send_heartbeat()

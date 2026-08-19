@@ -44,6 +44,7 @@ class Message(IntEnum):
     
     # Robot instructions
     MSG_ABS_JOINT_MOVE = 0x96,
+    MSG_JOINT_MOVE = 0x97,
     
     # Unknown code
     MSG_UNKNOWN = 0xFF
@@ -263,7 +264,18 @@ class MR3MiniComm:
         code = Message.MSG_ABS_JOINT_MOVE
         data = struct.pack('<ffffB', pos[0], pos[1], pos[2], pos[3], speed)
         packet = self.build_packet(code, data)
-        self.uart.write(packet)     
+        self.uart.write(packet)
+        
+    def move_j(self, cmd):
+        self.check_comm()
+        
+        pose = cmd.pose
+        speed = cmd.speed
+        
+        code = Message.MSG_JOINT_MOVE
+        data = struct.pack('<ffffB', pose[0], pose[1], pose[2], pose[3], speed)
+        packet = self.build_packet(code, data)
+        self.uart.write(packet)      
         
     def build_packet(self, code, data): # packet structure = [HEADER_1][HEADER_2][LENGTH][CODE][DATA][CHECKSUM]
         code = bytes([code])
