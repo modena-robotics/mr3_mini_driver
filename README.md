@@ -3,7 +3,7 @@ ROS 2 driver for the MR-3 Mini palletizing robot.
 
 This package provides communication between ROS 2 and the MR-3 Mini robot controller.
 
-It publishes the robot state, receives jog commands, and provides action interfaces for executing robot motions.
+It publishes the robot state, receives jog commands, and provides action interfaces for executing robot instructions.
 
 To jog the robot, start the `keyboard_teleop` node from the `modena_teleop` package after launching the driver.
 
@@ -15,6 +15,7 @@ To jog the robot, start the `keyboard_teleop` node from the `modena_teleop` pack
 - Robot state publishing
 - Receives jog commands from ROS 2 nodes
 - HOME and REST motion actions
+- Joint and linear motion actions
 - Motion result reporting
 - RViz visualization
 - PlotJuggler integration
@@ -92,8 +93,13 @@ PlotJuggler will then open and start plotting joint positions from `RobotState` 
 ## Action Servers
 | Action | Action Type | Description |
 |--------|--------------|-------------|
+| `/move_j` | `modena_interfaces/MoveJ` | Move the robot to the specified Cartesian pose using a joint-space trajectory |
+| `/move_l` | `modena_interfaces/MoveL` | Move the robot to the specified Cartesian pose pose using a linear trajectory |
+| `/move_abs_j` | `modena_interfaces/MoveAbsJ` | Move the robot to the specified absolute joint positions using a joint-space trajectory |
 | `/move_home` | `modena_interfaces/MoveHome` | Move the robot to the HOME position at the specified speed |
 | `/move_rest` | `modena_interfaces/MoveRest` | Move the robot to the REST position at the predefined speed |
+
+All motion actions return a `move_result` indicating the outcome of the requested motion.
 
 ## Dependencies
 This package depends on:
@@ -108,7 +114,6 @@ The `bringup.launch.py` launch file also requires:
 To control the robot using the keyboard, also install:
 
 - `modena_teleop`
-
 
 ## Compatibility
 Tested with ROS 2 Jazzy.
