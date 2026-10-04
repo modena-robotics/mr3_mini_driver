@@ -8,31 +8,25 @@ from launch.conditions import IfCondition
 
 
 def generate_launch_description():
-    # Package paths
     description_pkg_path = get_package_share_directory("mr3_mini_description")
     driver_pkg_path = get_package_share_directory("mr3_mini_driver")
 
-    # Robot URDF
     urdf_file = os.path.join(description_pkg_path, "urdf", "mr3_mini.urdf")
 
     with open(urdf_file, "r", encoding="utf-8") as f:
         robot_desc = f.read()
 
-    # Default Rviz view configuration
     rviz_def_config = os.path.join(description_pkg_path, "rviz", "mr3_mini_view.rviz")
-
-    # Plot juggler configuration
     plotjuggler_config = os.path.join(driver_pkg_path, "config", "plotjuggler_layout.xml")
 
-    # Launch configurations
     show_plotter = LaunchConfiguration("show_plotter")
+    show_tcp_path = LaunchConfiguration('show_tcp_path')
 
     return LaunchDescription(
         [
-            # Controls launching plotter
             DeclareLaunchArgument("show_plotter", default_value="false"),
+            DeclareLaunchArgument("show_tcp_path", default_value ="false"),
             
-            # MR-3 Mini Driver
             Node(
                 package="mr3_mini_driver",
                 executable="mr3_mini_driver",
@@ -40,7 +34,6 @@ def generate_launch_description():
                 output="screen",
             ),
             
-            # Publishes the robot state (required for Rviz)
             Node(
                 package="robot_state_publisher",
                 executable="robot_state_publisher",
@@ -48,7 +41,6 @@ def generate_launch_description():
                 parameters=[{"robot_description": robot_desc}],
             ),
             
-            # Plotjuggler with pre-configured view
             Node(
                 package="plotjuggler",
                 executable="plotjuggler",
@@ -58,7 +50,13 @@ def generate_launch_description():
                 condition=IfCondition(show_plotter),
             ),
             
-            # Rviz with pre-configured view
+            Node(
+                package='mr3_mini_description',
+                executable='tcp_path_pub',
+                output='screen',
+                condition=IfCondition(show_tcp_path)
+            ),
+            
             Node(
                 package="rviz2",
                 executable="rviz2",

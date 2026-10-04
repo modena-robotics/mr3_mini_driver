@@ -22,53 +22,61 @@ class Message(IntEnum):
     MSG_DISCONNECT = 0x02
     MSG_DISCONNECTED = 0x03
     MSG_HEARTBEAT = 0x04
-    
+
     # Data
     MSG_ROBOT_STATE = 0x0A
 
     # Move result
     MSG_MOVE_RESULT = 0x1E
+    MSG_INST_RESULT = 0x1F
 
     # Jog instructions
     MSG_JOG_START = 0x28
-    MSG_JOG_STOP = 0x29   
-    
+    MSG_JOG_STOP = 0x29 
+
     # Default positions
-    MSG_MOVE_HOME = 0x2D,
-    MSG_MOVE_REST = 0x2E,
-    
+    MSG_MOVE_HOME = 0x2D
+    MSG_MOVE_REST = 0x2E
+
     # System information
     MSG_SYSTEM_INIT_OK = 0x6E
     MSG_FAULT_RAISE = 0x6F
     MSG_WARNING_RAISE = 0x70
-    
+
     # Robot instructions
-    MSG_ABS_JOINT_MOVE = 0x96,
-    MSG_JOINT_MOVE = 0x97,
-    MSG_LINEAR_MOVE = 0x98,
-    
+    MSG_ABS_JOINT_MOVE = 0x96
+    MSG_JOINT_MOVE = 0x97
+    MSG_LINEAR_MOVE = 0x98
+    MSG_WAIT_TIME = 0x9A
+
     # Unknown code
     MSG_UNKNOWN = 0xFF
+
+
+class InstructionResult(IntEnum):
+    INST_FINISHED = 0x00
+    INST_FAILED = 0x01
+    INST_ABORTED = 0x02
 
 
 class MoveResult(IntEnum):
     # General results
     MOVE_FINISHED = 0x00
     MOVE_FEASIBLE = 0x01
-    MOVE_INFEASIBLE = 0x02           # move is infeasible: reduce speed or increase move distance    
+    MOVE_INFEASIBLE = 0x02           # move is infeasible: reduce speed or increase move distance
     MOVE_POSE_REACHABLE = 0x03
     MOVE_OUTSIDE_OF_WORKSPACE = 0x04
     MOVE_UNREACHABLE_INT_PT = 0x05   # an intermediate waypoint in a linear move is not reachable
     MOVE_JOG_FINISHED = 0x06
     MOVE_HOMING_FINISHED = 0x07
-    
+
     # Move parameter limit violations
     MOVE_SPEED_OUT_OF_RANGE = 0x64
     MOVE_JOINT_VEL_LIMIT_EXCEEDED = 0x65
     MOVE_LINEAR_VEL_LIMIT_EXCEEDED = 0x66
     MOVE_JOINT_ACC_LIMIT_EXCEEDED = 0x67
     MOVE_LINEAR_ACC_LIMIT_EXCEEDED = 0x68
-    
+
     # Jog parameter limit violations
     MOVE_JOG_SPEED_OUT_OF_RANGE = 0x69
     MOVE_JOINT_JOG_VEL_LIMIT_EXCEEDED = 0x6A
@@ -83,26 +91,29 @@ class MoveResult(IntEnum):
     MOVE_J4_LIMIT_VIOLATION = 0x99
     MOVE_MOTOR_3_LIMIT_VIOLATION = 0x9A
     MOVE_PASSIVE_JOINT_LIMIT_VIOLATION = 0x9B
-    
+
     # Jogging cannot be started because a physical limit would be exceeded
-    MOVE_J1_JOG_LIMIT_PROXIMITY = 0x9C,
-    MOVE_J2_JOG_LIMIT_PROXIMITY = 0x9D,
-    MOVE_J3_JOG_LIMIT_PROXIMITY = 0x9E,
-    MOVE_J4_JOG_LIMIT_PROXIMITY = 0x9F,
-    MOVE_MOTOR_3_JOG_LIMIT_PROXIMITY = 0xA0,
+    MOVE_J1_JOG_LIMIT_PROXIMITY = 0x9C
+    MOVE_J2_JOG_LIMIT_PROXIMITY = 0x9D
+    MOVE_J3_JOG_LIMIT_PROXIMITY = 0x9E
+    MOVE_J4_JOG_LIMIT_PROXIMITY = 0x9F
+    MOVE_MOTOR_3_JOG_LIMIT_PROXIMITY = 0xA0
     MOVE_PASSIVE_JOINT_JOG_LIMIT_PROXIMITY = 0xA1
     MOVE_WORKSPACE_JOG_LIMIT_PROXIMITY = 0xA2
     
+class WaitTimeResult(IntEnum):
+    WAIT_TIME_SUCCESS = 0x00
+    WAIT_TIME_INVALID = 0x01
 
 class Fault(IntEnum):
     # Control loop
     FAULT_CONTROL_LOOP_QUEUE_INIT = 0x32
     FAULT_CONTROL_LOOP_TASK_INIT = 0x33
-    
+
     # Program executor
     FAULT_PROG_EXEC_QUEUE_INIT = 0x3C
     FAULT_PROG_EXEC_TASK_INIT = 0x3D
-    
+
     # Hardware timer
     FAULT_HW_TIMER_INIT = 0x46
     FAULT_HW_TIMER_COUNTER = 0x47
@@ -110,10 +121,11 @@ class Fault(IntEnum):
     FAULT_HW_TIMER_ENABLE_INTR = 0x49
     FAULT_HW_TIMER_ISR_ADD = 0x4A
     FAULT_HW_TIMER_START = 0x4B
-    
+
     # Communication monitor
     FAULT_COMM_MONITOR_TASK_INIT = 0x73
     FAULT_COMM_MONITOR_TIMEOUT = 0x74
+
 
 class Warning(IntEnum):
     WARNING_STATE_FEEDBACK_TASK_INIT = 0x00
@@ -128,7 +140,7 @@ class MR3MiniComm:
 
         self.packet = bytearray(64)
         self.index = 0
-    
+
     def init_uart(self, retries=3, timeout=0.2):
         # Try every available serial port
         for port in list_ports.comports():
@@ -136,35 +148,35 @@ class MR3MiniComm:
                 self.uart = serial.Serial(port.device, 115200, timeout=0)
             except serial.SerialException:
                 continue
-            
+
             self.uart.reset_input_buffer()
             self.uart.reset_output_buffer()
-            
+
             # Try to establish communication
             for _ in range(retries):
                 self.init_comm()
                 start_time = time.time()
-                
+
                 while time.time() - start_time < timeout:
                     while True:
                         uart_msg = self.read_and_parse()
-                        
+
                         if uart_msg is None:
                             break
-                        
+
                         cmd = uart_msg[0]
-                        
+
                         if cmd == Message.MSG_COMM_ESTABLISHED:
                             self.comm_state = CommState.COMM_ESTABLISHED
                             return
-                
+
                 time.sleep(0.005)
-            
+
             # Incorrect controller: close port and try the next one
             self.uart.close()
             self.uart = None
-        
-        raise RuntimeError("No compatible Modena controller found")    
+
+        raise RuntimeError("No compatible Modena controller found")
 
     def init_comm(self):
         code = Message.MSG_ESTABLISH_COMM
@@ -177,7 +189,7 @@ class MR3MiniComm:
     def end_uart(self):
         self.disconnect()
         self.close_uart()
-    
+
     def disconnect(self, retries=3, timeout=0.2):
         for _ in range(retries):
             self.end_comm()
@@ -206,7 +218,7 @@ class MR3MiniComm:
 
         packet = self.build_packet(code, data)
 
-        self.uart.write(packet)    
+        self.uart.write(packet)
 
     def close_uart(self):
         if self.uart.is_open and self.uart is not None:
@@ -215,7 +227,7 @@ class MR3MiniComm:
     def check_comm(self):
         if self.comm_state != CommState.COMM_ESTABLISHED:
             raise RuntimeError("Connection not established")
-    
+
     def jog_start(self, msg):
         self.check_comm()
 
@@ -231,83 +243,91 @@ class MR3MiniComm:
         data = bytes([0])
         packet = self.build_packet(code, data)
         self.uart.write(packet)
-    
+
     def send_heartbeat(self):
         self.check_comm()
-        
+
         code = Message.MSG_HEARTBEAT
         data = bytes([0])
         packet = self.build_packet(code, data)
         self.uart.write(packet)
-    
+
     def move_home(self, cmd):
         self.check_comm()
-        
+
         code = Message.MSG_MOVE_HOME
-        data = bytes([cmd.speed])        
-        packet = self.build_packet(code, data)        
+        data = bytes([cmd.speed])
+        packet = self.build_packet(code, data)
         self.uart.write(packet)
-    
-    def move_rest(self):        
+
+    def move_rest(self):
         self.check_comm()
-        
+
         code = Message.MSG_MOVE_REST
         data = bytes([0])
-        packet = self.build_packet(code, data) 
+        packet = self.build_packet(code, data)
         self.uart.write(packet)
-        
+
     def move_abs_j(self, cmd):
         self.check_comm()
-        
+
         pos = cmd.pos
         speed = cmd.speed
-        
+
         code = Message.MSG_ABS_JOINT_MOVE
-        data = struct.pack('<ffffB', pos[0], pos[1], pos[2], pos[3], speed)
+        data = struct.pack("<ffffB", pos[0], pos[1], pos[2], pos[3], speed)
         packet = self.build_packet(code, data)
         self.uart.write(packet)
-        
+
     def move_j(self, cmd):
         self.check_comm()
-        
+
         pose = cmd.pose
         speed = cmd.speed
-        
+
         code = Message.MSG_JOINT_MOVE
-        data = struct.pack('<ffffB', pose[0], pose[1], pose[2], pose[3], speed)
+        data = struct.pack("<ffffB", pose[0], pose[1], pose[2], pose[3], speed)
         packet = self.build_packet(code, data)
         self.uart.write(packet)
-        
+
     def move_l(self, cmd):
         self.check_comm()
         
         pose = cmd.pose
         speed = cmd.speed
-        
+
         code = Message.MSG_LINEAR_MOVE
-        data = struct.pack('<ffffB', pose[0], pose[1], pose[2], pose[3], speed)
+        data = struct.pack("<ffffB", pose[0], pose[1], pose[2], pose[3], speed)
         packet = self.build_packet(code, data)
-        self.uart.write(packet)     
-        
-    def build_packet(self, code, data): # packet structure = [HEADER_1][HEADER_2][LENGTH][CODE][DATA][CHECKSUM]
+        self.uart.write(packet)
+
+    def wait_time(self, cmd):
+        self.check_comm()
+
+        code = Message.MSG_WAIT_TIME
+        data = struct.pack("<f", cmd.time_s)
+        packet = self.build_packet(code, data)
+        self.uart.write(packet)
+
+    def build_packet(self, code, data):  # packet structure = [HEADER_1][HEADER_2][LENGTH][CODE][DATA][CHECKSUM]
         code = bytes([code])
         length = bytes([len(code) + len(data)])
         checksum = sum(HEADERS + length + code + data)
         checksum = bytes([checksum & 0xFF])
         packet = HEADERS + length + code + data + checksum
 
-        return packet    
+        return packet
 
     def read_and_parse(self):
         if self.uart.in_waiting > 0:
             data = self.uart.read(self.uart.in_waiting)
             n = len(data)
-            
+
             # Receive buffer overflow: discard buffered data and resync
-            if self.index + n > len(self.packet):            
+            if self.index + n > len(self.packet):
                 self.index = 0
 
-            # Append new data to buffer            
+            # Append new data to buffer
             self.packet[self.index : self.index + n] = data
             self.index += n
 
@@ -316,60 +336,65 @@ class MR3MiniComm:
                 return None
 
             # If headers check fails: shift left by 1 byte (resync)
-            if self.packet[0] != HEADER_1 or self.packet[1] != HEADER_2:                
+            if self.packet[0] != HEADER_1 or self.packet[1] != HEADER_2:
                 self.packet[: self.index - 1] = self.packet[1 : self.index]
                 self.index -= 1
                 continue
 
-            total_length = (self.packet[2] + 4)
+            total_length = self.packet[2] + 4
 
             # Wait for more data
             if self.index < total_length:
-                return None  
+                return None
 
             checksum = sum(self.packet[0 : total_length - 1]) & 0xFF
 
             # If checksum fails: remove invalid packet from the buffer
-            if checksum != self.packet[total_length - 1]:               
+            if checksum != self.packet[total_length - 1]:
                 remaining = self.index - total_length
 
                 if remaining > 0:
-                    self.packet[:remaining] = self.packet[total_length:self.index]
+                    self.packet[:remaining] = self.packet[total_length : self.index]
 
                 self.index = remaining
 
                 return None
 
             cmd = Message(self.packet[3])
-            
-            match cmd:                
+
+            match cmd:
                 case Message.MSG_ROBOT_STATE:
                     joint_pos = struct.unpack("<4f", self.packet[4:20])
                     pose = struct.unpack("<4f", self.packet[20:36])
                     state = (joint_pos, pose)
                     result = (cmd, state)
+                    
+                case Message.MSG_INST_RESULT:
+                    inst_result = InstructionResult(self.packet[4])
+                    result_code = self.packet[5]           
+                    result = (cmd, (inst_result, result_code))
 
                 case Message.MSG_MOVE_RESULT:
-                    moveResult = MoveResult(self.packet[4])
-                    result = (cmd, moveResult)
+                    move_result = MoveResult(self.packet[4])
+                    result = (cmd, move_result)
 
                 case Message.MSG_COMM_ESTABLISHED:
                     result = (cmd, None)
 
                 case Message.MSG_DISCONNECTED:
                     result = (cmd, None)
-                
+
                 case Message.MSG_SYSTEM_INIT_OK:
                     result = (cmd, None)
-                
+
                 case Message.MSG_FAULT_RAISE:
                     fault = Fault(self.packet[4])
                     result = (cmd, fault)
-                            
+
                 case Message.MSG_WARNING_RAISE:
                     warning = Warning(self.packet[4])
                     result = (cmd, warning)
-                    
+
                 case _:
                     cmd = Message.MSG_UNKNOWN
                     result = (cmd, None)
@@ -383,4 +408,4 @@ class MR3MiniComm:
             else:
                 self.index = 0
 
-            return result   
+            return result

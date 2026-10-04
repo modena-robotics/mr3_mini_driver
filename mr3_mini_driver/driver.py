@@ -3,8 +3,8 @@ from rclpy.node import Node
 from rclpy.action import ActionServer
 from sensor_msgs.msg import JointState
 from modena_common.enums import JogType
-from modena_interfaces.msg import JogCmd, RobotState
-from modena_interfaces.action import MoveHome, MoveRest, MoveAbsJ, MoveJ, MoveL
+from modena_interfaces.msg import JogCmd, JogStatus, RobotState
+from modena_interfaces.action import MoveHome, MoveRest, MoveAbsJ, MoveJ, MoveL, WaitTime
 from mr3_mini_driver.comm import MR3MiniComm, Message, MoveResult, Fault, Warning
 import math
 import threading
@@ -29,12 +29,14 @@ class MR3MiniDriver(Node):
         self.joint_state_pub = self.create_publisher(JointState, "joint_states", 10)        
         self.robot_state_pub = self.create_publisher(RobotState, "robot_state", 10)
         self.jog_cmd_sub = self.create_subscription(JogCmd, "jog_cmd", self.jog_callback, 10)
+        self.jog_status_pub = self.create_publisher(JogStatus, "jog_status", 10)
         
         self.move_home_srv = ActionServer(self, MoveHome, "move_home", self.move_home_callback)
         self.move_rest_srv = ActionServer(self, MoveRest, "move_rest", self.move_rest_callback)
         self.move_abs_j_srv = ActionServer(self, MoveAbsJ, "move_abs_j", self.move_abs_j_callback)
         self.move_j_srv = ActionServer(self, MoveJ, "move_j", self.move_j_callback)
         self.move_l_srv = ActionServer(self, MoveL, "move_l", self.move_l_callback)
+        self.wait_time_srv = ActionServer(self, WaitTime, "wait_time", self.wait_time_callback)
         
         self.get_logger().info("MR-3 Mini driver started")
 
@@ -45,8 +47,9 @@ class MR3MiniDriver(Node):
         self.heartbeat_enabled = False
         self.heartbeat_tick_counter = 0    
         
-        self.move_finished = threading.Event()
-        self.move_result = None
+        self.inst_finished = threading.Event()
+        self.inst_result = None
+        self.result_code = None
 
         self.uart_thread_running = threading.Event()
         self.uart_thread_running.set()
@@ -58,6 +61,7 @@ class MR3MiniDriver(Node):
         if msg.type != JogType.JOG_NONE:
             if not self.is_jogging:
                 self.is_jogging = True
+                self.jog_status_pub.publish(JogStatus(code=0))
                 self.comm.jog_start(msg)
 
         else:
@@ -65,39 +69,44 @@ class MR3MiniDriver(Node):
                 self.is_jogging = False
                 self.comm.jog_stop()
                 
-    def execute_motion(self, goal_handle, comm_fcn, result_type, use_goal=True):
+    def execute_instruction(self, goal_handle, comm_fcn, result_type, use_goal=True):
         goal = goal_handle.request
         
-        self.move_finished.clear()
-        self.move_result = None
+        self.inst_finished.clear()
+        self.inst_result = None
+        self.result_code = None
         
         if use_goal:
             comm_fcn(goal)
         else:
             comm_fcn()
         
-        self.move_finished.wait()        
+        self.inst_finished.wait()        
         goal_handle.succeed()
         
         result = result_type()
-        result.move_result = self.move_result
+        result.inst_result = self.inst_result
+        result.result_code = self.result_code
         
         return result
 
     def move_home_callback(self, goal_handle):
-       return self.execute_motion(goal_handle, self.comm.move_home, MoveHome.Result)
+       return self.execute_instruction(goal_handle, self.comm.move_home, MoveHome.Result)
     
     def move_rest_callback(self, goal_handle):
-        return self.execute_motion(goal_handle, self.comm.move_rest, MoveRest.Result, False)
+        return self.execute_instruction(goal_handle, self.comm.move_rest, MoveRest.Result, False)
     
     def move_abs_j_callback(self, goal_handle):
-        return self.execute_motion(goal_handle, self.comm.move_abs_j, MoveAbsJ.Result)
+        return self.execute_instruction(goal_handle, self.comm.move_abs_j, MoveAbsJ.Result)
     
     def move_j_callback(self, goal_handle):
-        return self.execute_motion(goal_handle, self.comm.move_j, MoveJ.Result)
+        return self.execute_instruction(goal_handle, self.comm.move_j, MoveJ.Result)
     
     def move_l_callback(self, goal_handle):
-        return self.execute_motion(goal_handle, self.comm.move_l, MoveL.Result)
+        return self.execute_instruction(goal_handle, self.comm.move_l, MoveL.Result)
+    
+    def wait_time_callback(self, goal_handle):
+        return self.execute_instruction(goal_handle, self.comm.wait_time, WaitTime.Result)
                 
     def pulse_beat(self):
         self.comm.send_heartbeat()
@@ -149,43 +158,38 @@ class MR3MiniDriver(Node):
                     self.heartbeat_enabled = True
 
                 case Message.MSG_MOVE_RESULT:
+                    if data in (
+                        MoveResult.MOVE_JOG_FINISHED,
+                        MoveResult.MOVE_J1_JOG_LIMIT_PROXIMITY,
+                        MoveResult.MOVE_J2_JOG_LIMIT_PROXIMITY,
+                        MoveResult.MOVE_J3_JOG_LIMIT_PROXIMITY,
+                        MoveResult.MOVE_J4_JOG_LIMIT_PROXIMITY,
+                        MoveResult.MOVE_MOTOR_3_JOG_LIMIT_PROXIMITY,
+                        MoveResult.MOVE_PASSIVE_JOINT_JOG_LIMIT_PROXIMITY,
+                        MoveResult.MOVE_WORKSPACE_JOG_LIMIT_PROXIMITY,
+                        MoveResult.MOVE_JOG_SPEED_OUT_OF_RANGE,
+                        MoveResult.MOVE_JOINT_JOG_VEL_LIMIT_EXCEEDED,
+                        MoveResult.MOVE_JOINT_JOG_ACC_LIMIT_EXCEEDED,
+                        MoveResult.MOVE_LINEAR_JOG_VEL_LIMIT_EXCEEDED,
+                        MoveResult.MOVE_LINEAR_JOG_ACC_LIMIT_EXCEEDED,
+                    ):
+                        self.jog_status_pub.publish(JogStatus(code=data))
+                        
                     match data:             
-                        # Jogging cannot be started because a physical limit would be exceeded
-                        case MoveResult.MOVE_J1_JOG_LIMIT_PROXIMITY:
-                            self.get_logger().warning("Cannot jog: J1 limit is too close")
-                        case MoveResult.MOVE_J2_JOG_LIMIT_PROXIMITY:
-                            self.get_logger().warning("Cannot jog: J2 limit is too close")
-                        case MoveResult.MOVE_J3_JOG_LIMIT_PROXIMITY:
-                            self.get_logger().warning("Cannot jog: J3 limit is too close")
-                        case MoveResult.MOVE_J4_JOG_LIMIT_PROXIMITY:
-                            self.get_logger().warning("Cannot jog: J4 limit is too close")
-                        case MoveResult.MOVE_MOTOR_3_JOG_LIMIT_PROXIMITY:
-                            self.get_logger().warning("Cannot jog: M3 joint limit is too close")
-                        case MoveResult.MOVE_PASSIVE_JOINT_JOG_LIMIT_PROXIMITY:
-                            self.get_logger().warning("Cannot jog: Passive joint limit is too close")
-                        case MoveResult.MOVE_WORKSPACE_JOG_LIMIT_PROXIMITY:
-                            self.get_logger().warning("Cannot jog: Workspace limit is too close")
-                        
-                        # Requested jog speed, velocity, or acceleration exceeds the limit
-                        case MoveResult.MOVE_JOG_SPEED_OUT_OF_RANGE:
-                            self.get_logger().warning("Cannot jog: requested jog speed is outside the valid range (1-100%)")
-                        case MoveResult.MOVE_JOINT_JOG_VEL_LIMIT_EXCEEDED:
-                            self.get_logger().warning("Cannot jog: requested joint jog velocity exceeds the limit")
-                        case MoveResult.MOVE_JOINT_JOG_ACC_LIMIT_EXCEEDED:
-                            self.get_logger().warning("Cannot jog: requested joint jog acceleration exceeds the limit")
-                        case MoveResult.MOVE_LINEAR_JOG_VEL_LIMIT_EXCEEDED:
-                            self.get_logger().warning("Cannot jog: requested linear jog velocity exceeds the limit")
-                        case MoveResult.MOVE_LINEAR_JOG_ACC_LIMIT_EXCEEDED:
-                            self.get_logger().warning("Cannot jog: requested linear jog acceleration exceeds the limit")
-                        
                         case MoveResult.MOVE_HOMING_FINISHED:
                             self.get_logger().info("Homing finished")
                         case MoveResult.MOVE_FINISHED:
-                            self.move_result = data
-                            self.move_finished.set()
+                            self.inst_result = data
+                            self.result_code = 0
+                            self.inst_finished.set()
                         case _:
-                            self.move_result = data
-                            self.move_finished.set()
+                            self.inst_result = data
+                            self.inst_finished.set()
+                            
+                case Message.MSG_INST_RESULT:                    
+                    self.inst_result = data[0]
+                    self.result_code = data[1]
+                    self.inst_finished.set()
                         
                 case Message.MSG_FAULT_RAISE:                
                     match data:
