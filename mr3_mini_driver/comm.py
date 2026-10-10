@@ -8,6 +8,8 @@ import time
 HEADER_1 = 0xAA
 HEADER_2 = 0x55
 HEADERS = bytes([HEADER_1, HEADER_2])
+MAX_PAYLOAD_LENGTH = 60   # firmware MAX_PACKET_SIZE (64) - 4
+MAX_RX_BUFFER = 4096      # safety net against unbounded growth
 
 
 class CommState(IntEnum):
@@ -138,8 +140,7 @@ class MR3MiniComm:
         self.uart = None
         self.comm_state = CommState.COMM_DISCONNECTED
 
-        self.packet = bytearray(64)
-        self.index = 0
+        self.rx_buf = bytearray()
 
     def init_uart(self, retries=3, timeout=0.2):
         # Try every available serial port
@@ -150,6 +151,7 @@ class MR3MiniComm:
                 continue
 
             self.uart.reset_input_buffer()
+            self.rx_buf.clear()
             self.uart.reset_output_buffer()
 
             # Try to establish communication
@@ -221,7 +223,7 @@ class MR3MiniComm:
         self.uart.write(packet)
 
     def close_uart(self):
-        if self.uart.is_open and self.uart is not None:
+        if self.uart is not None and self.uart.is_open:
             self.uart.close()
 
     def check_comm(self):
@@ -320,92 +322,82 @@ class MR3MiniComm:
 
     def read_and_parse(self):
         if self.uart.in_waiting > 0:
-            data = self.uart.read(self.uart.in_waiting)
-            n = len(data)
+            self.rx_buf += self.uart.read(self.uart.in_waiting)
 
-            # Receive buffer overflow: discard buffered data and resync
-            if self.index + n > len(self.packet):
-                self.index = 0
-
-            # Append new data to buffer
-            self.packet[self.index : self.index + n] = data
-            self.index += n
+            if len(self.rx_buf) > MAX_RX_BUFFER:
+                del self.rx_buf[:-MAX_PAYLOAD_LENGTH]
 
         while True:
-            if self.index < 3:
+            # Resync: discard everything before the next header
+            start = self.rx_buf.find(HEADERS)
+
+            if start < 0:
+                # Keep a trailing HEADER_1: it may be the first half of the next header
+                keep = 1 if self.rx_buf.endswith(bytes([HEADER_1])) else 0
+                del self.rx_buf[:len(self.rx_buf) - keep]
                 return None
 
-            # If headers check fails: shift left by 1 byte (resync)
-            if self.packet[0] != HEADER_1 or self.packet[1] != HEADER_2:
-                self.packet[: self.index - 1] = self.packet[1 : self.index]
-                self.index -= 1
+            del self.rx_buf[:start]
+
+            if len(self.rx_buf) < 3:
+                return None
+
+            length = self.rx_buf[2]
+
+            # False header: drop one byte and search again
+            if length == 0 or length > MAX_PAYLOAD_LENGTH:
+                del self.rx_buf[:1]
                 continue
 
-            total_length = self.packet[2] + 4
+            total_length = length + 4
 
             # Wait for more data
-            if self.index < total_length:
+            if len(self.rx_buf) < total_length:
                 return None
 
-            checksum = sum(self.packet[0 : total_length - 1]) & 0xFF
+            packet = bytes(self.rx_buf[:total_length])
 
-            # If checksum fails: remove invalid packet from the buffer
-            if checksum != self.packet[total_length - 1]:
-                remaining = self.index - total_length
+            # Corrupted packet or false header: drop one byte, not the whole packet
+            if sum(packet[:-1]) & 0xFF != packet[-1]:
+                del self.rx_buf[:1]
+                continue
 
-                if remaining > 0:
-                    self.packet[:remaining] = self.packet[total_length : self.index]
+            del self.rx_buf[:total_length]
 
-                self.index = remaining
+            return self.decode(packet)
+  
+    def decode(self, packet):
+        try:
+            cmd = Message(packet[3])
+        except ValueError:
+            return (Message.MSG_UNKNOWN, packet[3])
 
-                return None
-
-            cmd = Message(self.packet[3])
-
+        try:
             match cmd:
                 case Message.MSG_ROBOT_STATE:
-                    joint_pos = struct.unpack("<4f", self.packet[4:20])
-                    pose = struct.unpack("<4f", self.packet[20:36])
-                    state = (joint_pos, pose)
-                    result = (cmd, state)
-                    
+                    joint_pos = struct.unpack("<4f", packet[4:20])
+                    pose = struct.unpack("<4f", packet[20:36])
+                    return (cmd, (joint_pos, pose))
+
                 case Message.MSG_INST_RESULT:
-                    inst_result = InstructionResult(self.packet[4])
-                    result_code = self.packet[5]           
-                    result = (cmd, (inst_result, result_code))
+                    inst_result = InstructionResult(packet[4])
+                    result_code = packet[5]           
+                    return (cmd, (inst_result, result_code))                
 
                 case Message.MSG_MOVE_RESULT:
-                    move_result = MoveResult(self.packet[4])
-                    result = (cmd, move_result)
-
-                case Message.MSG_COMM_ESTABLISHED:
-                    result = (cmd, None)
-
-                case Message.MSG_DISCONNECTED:
-                    result = (cmd, None)
-
-                case Message.MSG_SYSTEM_INIT_OK:
-                    result = (cmd, None)
+                    move_result = MoveResult(packet[4])
+                    return (cmd, move_result)                   
 
                 case Message.MSG_FAULT_RAISE:
-                    fault = Fault(self.packet[4])
-                    result = (cmd, fault)
+                    fault = Fault(packet[4])
+                    return (cmd, fault)
 
                 case Message.MSG_WARNING_RAISE:
-                    warning = Warning(self.packet[4])
-                    result = (cmd, warning)
+                    warning = Warning(packet[4])
+                    return (cmd, warning)
 
-                case _:
-                    cmd = Message.MSG_UNKNOWN
-                    result = (cmd, None)
+                case _:  # Other messages with no data field
+                    return (cmd, None)
 
-            # Remove processed packet
-            remaining = self.index - total_length
-
-            if remaining > 0:
-                self.packet[:remaining] = self.packet[total_length : self.index]
-                self.index = remaining
-            else:
-                self.index = 0
-
-            return result
+        except (IndexError, struct.error):  # payload too short for its message type
+            return (Message.MSG_UNKNOWN, packet[3])

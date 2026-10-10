@@ -224,6 +224,10 @@ class MR3MiniDriver(Node):
                             self.get_logger().error("Communication monitor initialization failed")
                         case Fault.FAULT_COMM_MONITOR_TIMEOUT:
                             self.get_logger().error("Heartbeat timed out")
+                            
+                        # Unknown
+                        case _:
+                            self.get_logger().error(f"Unknown fault code received: {data}")
                                     
                 case Message.MSG_WARNING_RAISE:
                     match data:
@@ -233,7 +237,9 @@ class MR3MiniDriver(Node):
                             self.get_logger().warning("Control queue is full: the last message has been discarded")
                         case Warning.WARNING_PROG_EXEC_QUEUE_FULL:
                             self.get_logger().warning("Program queue is full: the last instruction has been discarded")
-            
+                        case _:
+                            self.get_logger().error(f"Unknown warning code received: {data}")
+
                 case Message.MSG_UNKNOWN:
                     self.get_logger().warning(f"Unknown message code received: {cmd}")                  
                                                              
